@@ -12,7 +12,8 @@ from torch.autograd import Variable
 from baseline_model import LSTMModel
 from discreteflow_model import DFModel
 from config import parse_args
-from utils import load_indep_bernoulli, load_categorical, get_optimizer, log, save, load, build_log_p_T, get_kl_weight
+from utils import *
+from data import create_graphs, Graph_sequence_sampler_pytorch
 
 
 def run_epoch(train, start_kl_weight, delta_kl_weight, NLL_samples, ds, steps=-1):
@@ -118,13 +119,39 @@ torch.manual_seed(args.seed)
 random.seed(args.seed)
 
 # Load data
-if args.indep_bernoulli:
-    (train, val, test), pad_val, vocab_size = load_indep_bernoulli(args.dataset)
-else:
-    (train, val, test), pad_val, vocab_size = load_categorical(args.dataset, args.noT_condition)
-log_p_T, max_T = build_log_p_T(args, train, val)
-log_p_T = log_p_T.to(device)
-train_iter, val_iter, test_iter = torchtext.data.BucketIterator.splits((train, val, test), batch_sizes=[args.B_train, args.B_val, args.B_val], device=-1, repeat=False, sort_key=lambda x: len(x.text), sort_within_batch=True)
+# if args.indep_bernoulli:
+#     (train, val, test), pad_val, vocab_size = load_indep_bernoulli(args.dataset)
+# else:
+#     (train, val, test), pad_val, vocab_size = load_categorical(args.dataset, args.noT_condition)
+# log_p_T, max_T = build_log_p_T(args, train, val)
+# log_p_T = log_p_T.to(device)
+# train_iter, val_iter, test_iter = torchtext.data.BucketIterator.splits((train, val, test), batch_sizes=[args.B_train, args.B_val, args.B_val], device=-1, repeat=False, sort_key=lambda x: len(x.text), sort_within_batch=True)
+graphs = create_graphs.create(args)
+    
+# split datasets
+random.seed(123)
+shuffle(graphs)
+graphs_len = len(graphs)
+graphs_test = graphs[int(0.8 * graphs_len):]
+graphs_train = graphs[0:int(0.8*graphs_len)]
+graphs_validate = graphs[0:int(0.2*graphs_len)]
+
+args.max_num_node = max([graphs[i].number_of_nodes() for i in range(len(graphs))])
+
+# save ground truth graphs
+## To get train and test set, after loading you need to manually slice
+save_graph_list(graphs, args.graph_save_path + args.fname_train + '0.dat')
+save_graph_list(graphs, args.graph_save_path + args.fname_test + '0.dat')
+print('train and test graphs saved at: ', args.graph_save_path + args.fname_test + '0.dat')
+
+dataset_train = Graph_sequence_sampler_pytorch(graphs_train,max_prev_node=args.max_prev_node,max_num_node=args.max_num_node)
+dataset_val = Graph_sequence_sampler_pytorch(graphs_validate,max_prev_node=args.max_prev_node,max_num_node=args.max_num_node)
+sample_strategy = torch.utils.data.sampler.WeightedRandomSampler([1.0 / len(dataset) for i in range(len(dataset))],
+                                                                num_samples=args.batch_size*args.batch_ratio, replacement=True)
+train_iter = torch.utils.data.DataLoader(dataset_train, batch_size=args.batch_size, num_workers=args.num_workers,
+                                            sampler=sample_strategy)
+val_iter = torch.utils.data.DataLoader(dataset_val, batch_size=args.batch_size, num_workers=args.num_workers,
+                                            sampler=sample_strategy)
 
 # Build model
 loss_weights = torch.ones(vocab_size)
