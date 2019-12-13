@@ -3,102 +3,104 @@ from torch import nn
 from torch.autograd import Variable
 from torch.autograd import Function
 
-import torchtext
-from torchtext import data
+# import torchtext
+# from torchtext import data
 import io
 import os
 
+import pickle
+
 import numpy as np
 
-from data.indep_bernoulli.load_data import load_data
+# from data.indep_bernoulli.load_data import load_data
 
 # Data processing
 # ------------------------------------------------------------------------------------------------------------------------------
 
-class SentenceLanguageModelingDataset(data.Dataset):
-    def __init__(self, path, text_field, encoding='utf-8', include_eos=True, **kwargs):
-        fields = [('text', text_field)]
-        examples = []
-        with io.open(path, encoding=encoding) as f:
-            for line in f:
-                text = text_field.preprocess(line)
-                if include_eos:
-                    text += [u'<eos>']
-                examples.append(data.Example.fromlist([text], fields))
-
-        super().__init__(examples, fields, **kwargs)
-
-def load_indep_bernoulli(dataset):
-    dset = load_data(dataset)
-
-    class MultipleOutputExample:
-        def __init__(self, tensor):
-            self.text = tensor
-
-    class MultipleOutputField(data.Field):
-        def __init__(self, pad_index):
-            super().__init__(include_lengths=True, use_vocab=False)
-            self.pad_index = pad_index
-
-        def process(self, batch, device, train):
-            lengths = [len(batch_i) for batch_i in batch]
-            max_length = max(lengths)
-
-            D = batch[0].shape[1]
-
-            new_list = []
-            for seq in batch:
-                if len(seq) < max_length:
-                    padding = torch.zeros(1, D)
-                    padding[0, self.pad_index] = 1.
-                    padding = padding.repeat(max_length-len(seq), 1)
-                    seq = torch.cat((seq, padding), 0)
-                new_list.append(seq)
-
-            tensor = torch.stack(new_list)
-            tensor = torch.transpose(tensor, 0, 1)
-
-            lengths = torch.tensor(lengths)
-
-            return tensor, lengths
-
-    pad_val = 0
-    text = MultipleOutputField(pad_val)
-
-    datasets = {}
-    for split, split_data in dset.items():
-        examples = []
-        for seq in split_data['sequences']:
-            new_seq = torch.cat((torch.zeros(seq.shape[0], 1), seq), dim=1)
-            examples.append(MultipleOutputExample(new_seq))
-        datasets[split] = data.Dataset(examples, [('text', text)])
-
-    train = datasets['train']
-    val = datasets['valid']
-    test = datasets['test']
-
-    vocab_size = 89
-
-    return (train, val, test), pad_val, vocab_size
-        
-def load_categorical(dataset, noT_condition_prior):
-    unk_token = '<unk>'
-    text = torchtext.data.Field(include_lengths=True, unk_token=unk_token, tokenize=(lambda s: list(s.strip())))
-
-
-    MAX_LEN = 288
-    MIN_LEN = 1
-
-    train, val, test = SentenceLanguageModelingDataset.splits(path='./data/%s/'%dataset, train='train.txt', validation='valid.txt', test='test.txt', text_field=text,
-                                                              include_eos=noT_condition_prior, filter_pred=lambda x: len(vars(x)['text']) <= MAX_LEN and len(vars(x)['text']) >= MIN_LEN)
-
-
-    text.build_vocab(train)
-    pad_val = text.vocab.stoi['<pad>']
-
-    vocab_size = len(text.vocab)
-
-    return (train, val, test), pad_val, vocab_size
+# class SentenceLanguageModelingDataset(data.Dataset):
+#     def __init__(self, path, text_field, encoding='utf-8', include_eos=True, **kwargs):
+#         fields = [('text', text_field)]
+#         examples = []
+#         with io.open(path, encoding=encoding) as f:
+#             for line in f:
+#                 text = text_field.preprocess(line)
+#                 if include_eos:
+#                     text += [u'<eos>']
+#                 examples.append(data.Example.fromlist([text], fields))
+#
+#         super().__init__(examples, fields, **kwargs)
+#
+# def load_indep_bernoulli(dataset):
+#     dset = load_data(dataset)
+#
+#     class MultipleOutputExample:
+#         def __init__(self, tensor):
+#             self.text = tensor
+#
+#     class MultipleOutputField(data.Field):
+#         def __init__(self, pad_index):
+#             super().__init__(include_lengths=True, use_vocab=False)
+#             self.pad_index = pad_index
+#
+#         def process(self, batch, device, train):
+#             lengths = [len(batch_i) for batch_i in batch]
+#             max_length = max(lengths)
+#
+#             D = batch[0].shape[1]
+#
+#             new_list = []
+#             for seq in batch:
+#                 if len(seq) < max_length:
+#                     padding = torch.zeros(1, D)
+#                     padding[0, self.pad_index] = 1.
+#                     padding = padding.repeat(max_length-len(seq), 1)
+#                     seq = torch.cat((seq, padding), 0)
+#                 new_list.append(seq)
+#
+#             tensor = torch.stack(new_list)
+#             tensor = torch.transpose(tensor, 0, 1)
+#
+#             lengths = torch.tensor(lengths)
+#
+#             return tensor, lengths
+#
+#     pad_val = 0
+#     text = MultipleOutputField(pad_val)
+#
+#     datasets = {}
+#     for split, split_data in dset.items():
+#         examples = []
+#         for seq in split_data['sequences']:
+#             new_seq = torch.cat((torch.zeros(seq.shape[0], 1), seq), dim=1)
+#             examples.append(MultipleOutputExample(new_seq))
+#         datasets[split] = data.Dataset(examples, [('text', text)])
+#
+#     train = datasets['train']
+#     val = datasets['valid']
+#     test = datasets['test']
+#
+#     vocab_size = 89
+#
+#     return (train, val, test), pad_val, vocab_size
+#
+# def load_categorical(dataset, noT_condition_prior):
+#     unk_token = '<unk>'
+#     text = torchtext.data.Field(include_lengths=True, unk_token=unk_token, tokenize=(lambda s: list(s.strip())))
+#
+#
+#     MAX_LEN = 288
+#     MIN_LEN = 1
+#
+#     train, val, test = SentenceLanguageModelingDataset.splits(path='./data/%s/'%dataset, train='train.txt', validation='valid.txt', test='test.txt', text_field=text,
+#                                                               include_eos=noT_condition_prior, filter_pred=lambda x: len(vars(x)['text']) <= MAX_LEN and len(vars(x)['text']) >= MIN_LEN)
+#
+#
+#     text.build_vocab(train)
+#     pad_val = text.vocab.stoi['<pad>']
+#
+#     vocab_size = len(text.vocab)
+#
+#     return (train, val, test), pad_val, vocab_size
 
 # Utility functions
 # ------------------------------------------------------------------------------------------------------------------------------

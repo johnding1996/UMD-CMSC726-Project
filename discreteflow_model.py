@@ -173,17 +173,17 @@ class DFModel(nn.Module):
         ## Generative output to x
         self.outp_ff = FeedForwardNet(self.generative_model.outp_dim, hidden_size, vocab_size, 1, 'none', dropout=dropout_p if 'outp_ff' in dropout_locations else 0)
         
-        if tie_weights:
-            self.outp_ff.network[-1].weight = self.input_embedding.weight
+        # if tie_weights:
+        #     self.outp_ff.network[-1].weight = self.input_embedding.weight
+        #
+        # if indep_bernoulli:
+        #     self.cross_entropy = torch.nn.BCEWithLogitsLoss(reduction='none')
+        # else:
+        #     self.cross_entropy = torch.nn.CrossEntropyLoss(loss_weights, reduction='none')
 
-        if indep_bernoulli:
-            self.cross_entropy = torch.nn.BCEWithLogitsLoss(reduction='none')
-        else:
-            self.cross_entropy = torch.nn.CrossEntropyLoss(loss_weights, reduction='none')
-
-        self.indep_bernoulli = indep_bernoulli
-        self.vocab_size = vocab_size
-        self.dropout_locations = dropout_locations
+        # self.indep_bernoulli = indep_bernoulli
+        # self.vocab_size = vocab_size
+        # self.dropout_locations = dropout_locations
         self.max_T = max_T
 
         self.reset_parameters()
@@ -254,9 +254,16 @@ class DFModel(nn.Module):
         if 'embedding' in self.dropout_locations:
             embeddings = self.dropout(embeddings)
 
+
+
         z, log_q_z = self.inference_model.sample_q_z(embeddings, lengths, pos_cond, ELBO_samples) # [T, B, s, E]
-            
+
+
         log_p_z = self.generative_model.prior.evaluate(z, lengths_s, cond_inp_s=pos_cond_s)
+
+
+
+
         gen_outp = self.generative_model.apply_bilstm(z, lengths_s, cond_inp_s=pos_cond_s)
         gen_outp = gen_outp.view(gen_outp.shape[0], B*ELBO_samples, gen_outp.shape[-1]) # [T, B*s, 2*hidden]
 

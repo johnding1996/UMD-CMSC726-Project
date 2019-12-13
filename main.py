@@ -5,7 +5,7 @@ import math
 import json
 import numpy as np
 
-import torchtext
+# import torchtext
 import torch
 from torch.autograd import Variable
 
@@ -13,7 +13,9 @@ from baseline_model import LSTMModel
 from discreteflow_model import DFModel
 from config import parse_args
 from utils import *
-from data import create_graphs, Graph_sequence_sampler_pytorch
+from data import create_graphs
+from data.dataloader import Graph_sequence_sampler_pytorch
+
 
 
 def run_epoch(train, start_kl_weight, delta_kl_weight, NLL_samples, ds, steps=-1):
@@ -126,11 +128,11 @@ random.seed(args.seed)
 # log_p_T, max_T = build_log_p_T(args, train, val)
 # log_p_T = log_p_T.to(device)
 # train_iter, val_iter, test_iter = torchtext.data.BucketIterator.splits((train, val, test), batch_sizes=[args.B_train, args.B_val, args.B_val], device=-1, repeat=False, sort_key=lambda x: len(x.text), sort_within_batch=True)
-graphs = create_graphs.create(args)
+graphs = create_graphs.create_graphs(args)
     
 # split datasets
 random.seed(123)
-shuffle(graphs)
+random.shuffle(graphs)
 graphs_len = len(graphs)
 graphs_test = graphs[int(0.8 * graphs_len):]
 graphs_train = graphs[0:int(0.8*graphs_len)]
@@ -146,7 +148,7 @@ print('train and test graphs saved at: ', args.graph_save_path + args.fname_test
 
 dataset_train = Graph_sequence_sampler_pytorch(graphs_train,max_prev_node=args.max_prev_node,max_num_node=args.max_num_node)
 dataset_val = Graph_sequence_sampler_pytorch(graphs_validate,max_prev_node=args.max_prev_node,max_num_node=args.max_num_node)
-sample_strategy = torch.utils.data.sampler.WeightedRandomSampler([1.0 / len(dataset) for i in range(len(dataset))],
+sample_strategy = torch.utils.data.sampler.WeightedRandomSampler([1.0 / len(dataset_train) for i in range(len(dataset_train))],
                                                                 num_samples=args.batch_size*args.batch_ratio, replacement=True)
 train_iter = torch.utils.data.DataLoader(dataset_train, batch_size=args.batch_size, num_workers=args.num_workers,
                                             sampler=sample_strategy)
@@ -154,7 +156,7 @@ val_iter = torch.utils.data.DataLoader(dataset_val, batch_size=args.batch_size, 
                                             sampler=sample_strategy)
 
 # Build model
-loss_weights = torch.ones(vocab_size)
+loss_weights = torch.ones(args.max_num_node)
 loss_weights[pad_val] = 0
 
 if args.model_type == 'discrete_flow':
