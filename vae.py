@@ -162,7 +162,7 @@ def train(epoch):
         log_p_z = model.prior.evaluate(z, lengths_s=None, cond_inp_s=None)
         #################################################################################
 
-        loss += log_p_z
+        loss += -log_p_z
 
         loss.backward()
         train_loss += loss.item()
