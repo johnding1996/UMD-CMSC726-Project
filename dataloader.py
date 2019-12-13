@@ -1,8 +1,7 @@
 import torch
 import networkx as nx
 import numpy as np
-
-from CMSC726Project.data.graph_ops import bfs_seq, encode_adj, encode_adj_flexible
+from utils import *
 
 class Graph_sequence_sampler_pytorch(torch.utils.data.Dataset):
     def __init__(self, G_list, max_num_node=None, max_prev_node=None, iteration=20000):

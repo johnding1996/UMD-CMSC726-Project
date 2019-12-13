@@ -1,185 +1,112 @@
-import torch
-from torch import nn
-from torch.autograd import Variable
-from torch.autograd import Function
-
-# import torchtext
-# from torchtext import data
-import io
-import os
-
 import pickle
-
+import networkx as nx
 import numpy as np
 
-# from data.indep_bernoulli.load_data import load_data
+def create_graphs(args):
+    graphs=[]
+    # synthetic graphs
+    if args.graph_type=='ladder':
+        graphs = []
+        for i in range(100, 201):
+            graphs.append(nx.ladder_graph(i))
+        args.max_prev_node = 10
+    elif args.graph_type=='ladder_small':
+        graphs = []
+        for i in range(2, 11):
+            graphs.append(nx.ladder_graph(i))
+        args.max_prev_node = 10
+    elif args.graph_type=='tree':
+        graphs = []
+        for i in range(2,5):
+            for j in range(3,5):
+                graphs.append(nx.balanced_tree(i,j))
+        args.max_prev_node = 256
+    # elif args.graph_type=='caveman':
+    #     # graphs = []
+    #     # for i in range(5,10):
+    #     #     for j in range(5,25):
+    #     #         for k in range(5):
+    #     #             graphs.append(nx.relaxed_caveman_graph(i, j, p=0.1))
+    #     graphs = []
+    #     for i in range(2, 3):
+    #         for j in range(30, 81):
+    #             for k in range(10):
+    #                 graphs.append(caveman_special(i,j, p_edge=0.3))
+    #     args.max_prev_node = 100
+    # elif args.graph_type=='caveman_small':
+    #     # graphs = []
+    #     # for i in range(2,5):
+    #     #     for j in range(2,6):
+    #     #         for k in range(10):
+    #     #             graphs.append(nx.relaxed_caveman_graph(i, j, p=0.1))
+    #     graphs = []
+    #     for i in range(2, 3):
+    #         for j in range(6, 11):
+    #             for k in range(20):
+    #                 graphs.append(caveman_special(i, j, p_edge=0.8)) # default 0.8
+    #     args.max_prev_node = 20
+    # elif args.graph_type=='caveman_small_single':
+    #     # graphs = []
+    #     # for i in range(2,5):
+    #     #     for j in range(2,6):
+    #     #         for k in range(10):
+    #     #             graphs.append(nx.relaxed_caveman_graph(i, j, p=0.1))
+    #     graphs = []
+    #     for i in range(2, 3):
+    #         for j in range(8, 9):
+    #             for k in range(100):
+    #                 graphs.append(caveman_special(i, j, p_edge=0.5))
+    #     args.max_prev_node = 20
+    # elif args.graph_type.startswith('community'):
+    #     num_communities = int(args.graph_type[-1])
+    #     print('Creating dataset with ', num_communities, ' communities')
+    #     c_sizes = np.random.choice([12, 13, 14, 15, 16, 17], num_communities)
+    #     #c_sizes = [15] * num_communities
+    #     for k in range(3000):
+    #         graphs.append(n_community(c_sizes, p_inter=0.01))
+    #     args.max_prev_node = 80
+    elif args.graph_type=='grid':
+        graphs = []
+        for i in range(10,20):
+            for j in range(10,20):
+                graphs.append(nx.grid_2d_graph(i,j))
+        args.max_prev_node = 40
+    elif args.graph_type=='grid_small':
+        graphs = []
+        for i in range(2,5):
+            for j in range(2,6):
+                graphs.append(nx.grid_2d_graph(i,j))
+        args.max_prev_node = 15
+    elif args.graph_type=='barabasi':
+        graphs = []
+        for i in range(20,30):
+             for j in range(4,5):
+                graphs.append(nx.barabasi_albert_graph(i,j))
+        args.max_prev_node = 30
+    elif args.graph_type=='barabasi_small':
+        graphs = []
+        for i in range(4,21):
+             for j in range(3,4):
+                 for k in range(10):
+                    graphs.append(nx.barabasi_albert_graph(i,j))
+        args.max_prev_node = 20
+    elif args.graph_type=='grid_big':
+        graphs = []
+        for i in range(36, 46):
+            for j in range(36, 46):
+                graphs.append(nx.grid_2d_graph(i, j))
+        args.max_prev_node = 90
 
-# Data processing
-# ------------------------------------------------------------------------------------------------------------------------------
+    # elif 'barabasi_noise' in args.graph_type:
+    #     graphs = []
+    #     for i in range(100,101):
+    #         for j in range(4,5):
+    #             for k in range(500):
+    #                 graphs.append(nx.barabasi_albert_graph(i,j))
+    #     graphs = perturb_new(graphs,p=args.noise/10.0)
+    #     args.max_prev_node = 99
 
-# class SentenceLanguageModelingDataset(data.Dataset):
-#     def __init__(self, path, text_field, encoding='utf-8', include_eos=True, **kwargs):
-#         fields = [('text', text_field)]
-#         examples = []
-#         with io.open(path, encoding=encoding) as f:
-#             for line in f:
-#                 text = text_field.preprocess(line)
-#                 if include_eos:
-#                     text += [u'<eos>']
-#                 examples.append(data.Example.fromlist([text], fields))
-#
-#         super().__init__(examples, fields, **kwargs)
-#
-# def load_indep_bernoulli(dataset):
-#     dset = load_data(dataset)
-#
-#     class MultipleOutputExample:
-#         def __init__(self, tensor):
-#             self.text = tensor
-#
-#     class MultipleOutputField(data.Field):
-#         def __init__(self, pad_index):
-#             super().__init__(include_lengths=True, use_vocab=False)
-#             self.pad_index = pad_index
-#
-#         def process(self, batch, device, train):
-#             lengths = [len(batch_i) for batch_i in batch]
-#             max_length = max(lengths)
-#
-#             D = batch[0].shape[1]
-#
-#             new_list = []
-#             for seq in batch:
-#                 if len(seq) < max_length:
-#                     padding = torch.zeros(1, D)
-#                     padding[0, self.pad_index] = 1.
-#                     padding = padding.repeat(max_length-len(seq), 1)
-#                     seq = torch.cat((seq, padding), 0)
-#                 new_list.append(seq)
-#
-#             tensor = torch.stack(new_list)
-#             tensor = torch.transpose(tensor, 0, 1)
-#
-#             lengths = torch.tensor(lengths)
-#
-#             return tensor, lengths
-#
-#     pad_val = 0
-#     text = MultipleOutputField(pad_val)
-#
-#     datasets = {}
-#     for split, split_data in dset.items():
-#         examples = []
-#         for seq in split_data['sequences']:
-#             new_seq = torch.cat((torch.zeros(seq.shape[0], 1), seq), dim=1)
-#             examples.append(MultipleOutputExample(new_seq))
-#         datasets[split] = data.Dataset(examples, [('text', text)])
-#
-#     train = datasets['train']
-#     val = datasets['valid']
-#     test = datasets['test']
-#
-#     vocab_size = 89
-#
-#     return (train, val, test), pad_val, vocab_size
-#
-# def load_categorical(dataset, noT_condition_prior):
-#     unk_token = '<unk>'
-#     text = torchtext.data.Field(include_lengths=True, unk_token=unk_token, tokenize=(lambda s: list(s.strip())))
-#
-#
-#     MAX_LEN = 288
-#     MIN_LEN = 1
-#
-#     train, val, test = SentenceLanguageModelingDataset.splits(path='./data/%s/'%dataset, train='train.txt', validation='valid.txt', test='test.txt', text_field=text,
-#                                                               include_eos=noT_condition_prior, filter_pred=lambda x: len(vars(x)['text']) <= MAX_LEN and len(vars(x)['text']) >= MIN_LEN)
-#
-#
-#     text.build_vocab(train)
-#     pad_val = text.vocab.stoi['<pad>']
-#
-#     vocab_size = len(text.vocab)
-#
-#     return (train, val, test), pad_val, vocab_size
-
-# Utility functions
-# ------------------------------------------------------------------------------------------------------------------------------
-
-def get_optimizer(name, parameters, lr):
-    if name == 'adadelta':
-        optimizer = torch.optim.Adadelta(parameters, lr=lr)
-    elif name == 'adam':
-        optimizer = torch.optim.Adam(parameters, lr=lr)
-    elif name == 'sgd':
-        optimizer = torch.optim.SGD(parameters, lr=lr)
-    else:
-        raise NotImplementedError('Only adadelta, adam, and sgd, have been implemented')
-
-    return optimizer
-
-def log(args, log_str):
-    with open(args.logdir+'summary.txt', 'a+') as f:
-        f.write(log_str+'\n')
-
-def save(model, optimizer, args, name, current_epoch, best_val, lr):
-    savedir = args.savedir+name
-    os.makedirs(savedir, exist_ok=True)
-
-    torch.save(model.state_dict(), savedir+'/model.pt')
-    torch.save(optimizer.state_dict(), savedir+'/optimizer.pt')
-    np.savez(savedir+'/misc.npz', current_epoch=current_epoch, best_val=best_val, current_lr=lr)
-
-def load(model, optimizer, args):
-    model.load_state_dict(torch.load(args.load_dir+'/model.pt'))
-
-    try:
-        optimizer.load_state_dict(torch.load(args.load_dir+'/optimizer.pt'))
-        misc_data = np.load(args.load_dir+'/misc.npz')
-        current_epoch = misc_data['current_epoch']
-        best_val = misc_data['best_val']
-        current_lr = misc_data['current_lr']
-    except:
-        print('Error loading optimizer state. Will continue anyway starting from beginning')
-        current_epoch, best_val, current_lr = 0, 999999999, args.lr
-
-    return current_epoch, best_val, current_lr
-
-def build_log_p_T(args, train, val):
-    T_hist = torch.zeros(100000)
-    max_T = 0
-    for ex in train.examples+val.examples:
-        ex_len = len(ex.text)
-        T_hist[ex_len] += 1
-        if ex_len > max_T:
-            max_T = ex_len
-
-    if args.indep_bernoulli:
-        max_T = int(max_T*1.25)
-        T_hist += 1
-
-    T_hist = T_hist[:max_T+1]
-    log_p_T = torch.log(T_hist/T_hist.sum())
-
-    return log_p_T, max_T
-
-def get_kl_weight(args, i):
-    if args.initial_kl_zero == 0 and args.kl_rampup_time == 0:
-        return 1.0, True
-
-    x_start = args.initial_kl_zero
-    x_end = args.initial_kl_zero + args.kl_rampup_time
-    y_start = 0.00001
-    y_end = 1.0
-    done = False
-    if i < x_start:
-        cur_kl_weight = y_start
-    elif i > x_end:
-        cur_kl_weight = y_end
-        done = True
-    else:
-        cur_kl_weight = (i-x_start)/(x_end-x_start)*(y_end-y_start) + y_start
-
-    return cur_kl_weight, done
+    return graphs
 
 # Model utility functions
 # ------------------------------------------------------------------------------------------------------------------------------
@@ -188,36 +115,121 @@ def save_graph_list(G_list, fname):
     with open(fname, "wb") as f:
         pickle.dump(G_list, f)
 
-def make_pos_cond(T, B, lengths, max_T):
-    device = lengths.device
 
-    p_plus_int = torch.arange(T, device=device)[:, None].repeat(1, B)[:, :, None]
-    p_plus_oh = torch.empty(T, B, max_T, device=device).zero_()
-    p_plus_oh.scatter_(2, p_plus_int, 1)
-    
-    p_minus_int = lengths[None, :] - 1 - torch.arange(T, device=device)[:, None]
-    p_minus_int[p_minus_int < 0] = max_T-1
-    p_minus_oh = torch.empty(T, B, max_T, device=device).zero_()
-    p_minus_oh.scatter_(2, p_minus_int[:, :, None], 1)
-    
-    pos_cond = torch.cat((p_plus_oh, p_minus_oh), -1) # [T, B, max_T*2]
+def bfs_seq(G, start_id):
+    '''
+    get a bfs node sequence
+    :param G:
+    :param start_id:
+    :return:
+    '''
+    dictionary = dict(nx.bfs_successors(G, start_id))
+    start = [start_id]
+    output = [start_id]
+    while len(start) > 0:
+        next = []
+        while len(start) > 0:
+            current = start.pop(0)
+            neighbor = dictionary.get(current)
+            if neighbor is not None:
+                #### a wrong example, should not permute here!
+                # shuffle(neighbor)
+                next = next + neighbor
+        output = output + next
+        start = next
+    return output
 
-    return pos_cond
 
-def reverse_padded_sequence(inputs, lengths, batch_first=False):
-    if batch_first:
-        inputs = inputs.transpose(0, 1)
 
-    if inputs.size(1) != len(lengths):
-        raise ValueError('inputs incompatible with lengths.')
+def encode_adj(adj, max_prev_node=10, is_full = False):
+    '''
 
-    reversed_inputs = inputs.data.clone()
-    for i, length in enumerate(lengths):
-        time_ind = torch.LongTensor(list(reversed(range(length))))
-        reversed_inputs[:length, i] = inputs[:, i][time_ind]
+    :param adj: n*n, rows means time step, while columns are input dimension
+    :param max_degree: we want to keep row number, but truncate column numbers
+    :return: n*M(max_prev_node)
+    '''
+    if is_full:
+        max_prev_node = adj.shape[0]-1
 
-    if batch_first:
-        reversed_inputs = reversed_inputs.transpose(0, 1)
-        
-    return reversed_inputs
+    # pick up lower tri
+    adj = np.tril(adj, k=-1)
+    n = adj.shape[0]
+    adj = adj[1:n, 0:n-1]
+
+    # use max_prev_node to truncate
+    # note: now adj is a (n-1)*(n-1) matrix
+    adj_output = np.zeros((adj.shape[0], max_prev_node))
+    for i in range(adj.shape[0]):
+        input_start = max(0, i - max_prev_node + 1)
+        input_end = i + 1
+        output_start = max_prev_node + input_start - input_end
+        output_end = max_prev_node
+        adj_output[i, output_start:output_end] = adj[i, input_start:input_end]
+        adj_output[i,:] = adj_output[i,:][::-1] # reverse order
+
+    return adj_output
+
+def decode_adj(adj_output):
+    '''
+        recover to adj from adj_output
+        note: here adj_output have shape (n-1)*m
+    '''
+    max_prev_node = adj_output.shape[1]
+    adj = np.zeros((adj_output.shape[0], adj_output.shape[0]))
+    for i in range(adj_output.shape[0]):
+        input_start = max(0, i - max_prev_node + 1)
+        input_end = i + 1
+        output_start = max_prev_node + max(0, i - max_prev_node + 1) - (i + 1)
+        output_end = max_prev_node
+        adj[i, input_start:input_end] = adj_output[i,::-1][output_start:output_end] # reverse order
+    adj_full = np.zeros((adj_output.shape[0]+1, adj_output.shape[0]+1))
+    n = adj_full.shape[0]
+    adj_full[1:n, 0:n-1] = np.tril(adj, 0)
+    adj_full = adj_full + adj_full.T
+
+    return adj_full
+
+
+def encode_adj_flexible(adj):
+    '''
+    return a flexible length of output
+    note that here there is no loss when encoding/decoding an adj matrix
+    :param adj: adj matrix
+    :return: not a matrix, but a list of adj vectors.
+    '''
+    # pick up lower tri
+    adj = np.tril(adj, k=-1)
+    n = adj.shape[0]
+    adj = adj[1:n, 0:n-1]
+
+    adj_output = []
+    input_start = 0
+    for i in range(adj.shape[0]):
+        input_end = i + 1
+        adj_slice = adj[i, input_start:input_end]
+        adj_output.append(adj_slice)
+        non_zero = np.nonzero(adj_slice)[0]
+        input_start = input_end-len(adj_slice)+np.amin(non_zero)
+
+    return adj_output
+
+
+def decode_adj_flexible(adj_output):
+    '''
+    return a flexible length of output
+    note that here there is no loss when encoding/decoding an adj matrix
+    :param adj: adj matrix
+    :return:
+    '''
+    adj = np.zeros((len(adj_output), len(adj_output)))
+    for i in range(len(adj_output)):
+        output_start = i+1-len(adj_output[i])
+        output_end = i+1
+        adj[i, output_start:output_end] = adj_output[i]
+    adj_full = np.zeros((len(adj_output)+1, len(adj_output)+1))
+    n = adj_full.shape[0]
+    adj_full[1:n, 0:n-1] = np.tril(adj, 0)
+    adj_full = adj_full + adj_full.T
+
+    return adj_full
 
