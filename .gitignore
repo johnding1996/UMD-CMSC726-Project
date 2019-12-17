@@ -4,6 +4,9 @@ __pycache__
 *.png
 *.pdf
 output
+.idea
 
 slurm_scripts
 *.out
+
+.ipynb_checkpoints

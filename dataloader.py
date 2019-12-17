@@ -1,36 +1,49 @@
 import torch
 import networkx as nx
 import numpy as np
-
-import random
-import os
-import time
 from utils import *
 
-class Graph_sequence_sampler_pytorch(torch.utils.data.Dataset):
-    def __init__(self, G_list, max_num_node=None, max_prev_node=None, iteration=20000):
-        self.adj_all = []
-        self.len_all = []
-        for G in G_list:
-            self.adj_all.append(np.asarray(nx.to_numpy_matrix(G)))
-            self.len_all.append(G.number_of_nodes())
-        if max_num_node is None:
-            self.n = max(self.len_all)
-        else:
-            self.n = max_num_node
-        if max_prev_node is None:
-            print('calculating max previous node, total iteration: {}'.format(iteration))
-            self.max_prev_node = max(self.calc_max_prev_node(iter=iteration))
-            print('max previous node: {}'.format(self.max_prev_node))
-        else:
-            self.max_prev_node = max_prev_node
 
-        # self.max_prev_node = max_prev_node
+class GraphGenerator:
+    def __init__(self, graph_type, N, **kwargs):
+        self.N = N
+        self.graph_type = graph_type
+        self.Gs = self.generate(N, **kwargs)
+    
+    def generate(N, **kwargs):
+        print("Generating Graphs, type {}".format(self.graph_type))
+        if self.graph_type = 'NWS':
+            return [nx.newman_watts_strogatz_graph(n=kwargs.n, k=kwargs.k, p=kwargs.p) for _ in range(N)]
+        else
+            raise ValueError
 
-        # # sort Graph in descending order
-        # len_batch_order = np.argsort(np.array(self.len_all))[::-1]
-        # self.len_all = [self.len_all[i] for i in len_batch_order]
-        # self.adj_all = [self.adj_all[i] for i in len_batch_order]
+    def save(self, path):
+        f = open(path, 'wb')
+        cPickle.dump(self.__dict__, f, 2)
+        f.close()
+    
+    def load(self, path):
+        f = open(path, 'rb')
+        tmp_dict = cPickle.load(f)
+        f.close()
+        
+    def max_n(self):
+        return max([self.Gs.number_of_nodes() for G in self.Gs])
+    
+    def As(self):
+        return [np.asarray(nx.to_numpy_matrix(G)) for G in self.Gs]
+        
+        
+    
+
+class GraphSampler(torch.utils.data.Dataset):
+    def __init__(self, gg):
+        self.N = gg.N()
+        self.As = gg.As()
+        self.max_n = gg.max_n()
+        print('Calculating m, total iteration {}'.format(iteration))
+        self.max_prev_node = max(self.calc_max_prev_node(iter=iteration))
+        print('m = {}'.format(self.max_prev_node))
     def __len__(self):
         return len(self.adj_all)
     def __getitem__(self, idx):
@@ -57,15 +70,17 @@ class Graph_sequence_sampler_pytorch(torch.utils.data.Dataset):
         x_batch[1:adj_encoded.shape[0] + 1, :] = adj_encoded
         return {'x':x_batch,'y':y_batch, 'len':len_batch}
 
-    def calc_max_prev_node(self, iter=20000,topk=10):
+    def calc_max_prev_node(self, iter=20000, topk=10):
         max_prev_node = []
         for i in range(iter):
             if i % (iter / 5) == 0:
                 print('iter {} times'.format(i))
-            adj_idx = np.random.randint(len(self.adj_all))
-            adj_copy = self.adj_all[adj_idx].copy()
-            # print('Graph size', adj_copy.shape[0])
-            x_idx = np.random.permutation(adj_copy.shape[0])
+                
+            # randomly pick an A
+            adj_idx = np.random.randint(self.N)
+            adj_copy = self.As[adj_idx].copy()
+            n = adj_copy.shape[0]
+            x_idx = np.random.permutation(n)
             adj_copy = adj_copy[np.ix_(x_idx, x_idx)]
             adj_copy_matrix = np.asmatrix(adj_copy)
             G = nx.from_numpy_matrix(adj_copy_matrix)

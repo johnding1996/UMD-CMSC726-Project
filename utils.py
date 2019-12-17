@@ -1,5 +1,19 @@
+import pickle
 import networkx as nx
 import numpy as np
+
+
+def create_graphs(args):
+    if args.graph_type == 'NSS':
+        return [nx.newman_watts_strogatz_graph(n=20, k=4, p=) for _ in range(args.N)]
+    else:
+        raise ValueError
+
+
+def save_graphs(Gs, fname):
+    with open(fname, "wb") as handler:
+        pickle.dump(Gs, handler)
+
 
 def bfs_seq(G, start_id):
     '''
@@ -17,8 +31,6 @@ def bfs_seq(G, start_id):
             current = start.pop(0)
             neighbor = dictionary.get(current)
             if neighbor is not None:
-                #### a wrong example, should not permute here!
-                # shuffle(neighbor)
                 next = next + neighbor
         output = output + next
         start = next
@@ -117,3 +129,4 @@ def decode_adj_flexible(adj_output):
     adj_full = adj_full + adj_full.T
 
     return adj_full
+
