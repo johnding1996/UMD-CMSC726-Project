@@ -18,9 +18,9 @@ parser = argparse.ArgumentParser(description='Graph Discrete Flow')
 parser.add_argument('--batch-size', type=int, default=1, metavar='N',
                     help='input batch size for training (default: 128)')
 parser.add_argument('--batch_ratio', type=int,
-                    default=2)  # how many batches of samples per epoch, default 32, e.g., 1 epoch = 32 batches
+                    default=8)  # how many batches of samples per epoch, default 32, e.g., 1 epoch = 32 batches
 
-parser.add_argument('--epochs', type=int, default=5, metavar='N',
+parser.add_argument('--epochs', type=int, default=20, metavar='N',
                     help='number of epochs to train (default: 10)')
 parser.add_argument('--no-cuda', action='store_true',
                     help='enables CUDA training')
@@ -30,7 +30,7 @@ parser.add_argument('--log-interval', type=int, default=10, metavar='N',
                     help='how many batches to wait before logging training status')
 parser.add_argument('--output-dir', type=str, default='output')
 parser.add_argument('--run-name', type=str, default='vae_test')
-parser.add_argument('--graph-type', type=str, default='grid')
+parser.add_argument('--graph-type', type=str, default='barabasi_small')
 
 
 args = parser.parse_args()
@@ -72,10 +72,10 @@ kwargs = {'num_workers': 4, 'pin_memory': True} if args.cuda else {}
 train_iter = torch.utils.data.DataLoader(dataset_train, batch_size=args.batch_size, sampler=sample_strategy, **kwargs)
 test_iter = torch.utils.data.DataLoader(dataset_test, batch_size=args.batch_size, sampler=sample_strategy, **kwargs)
 
-model = DiscreteFlow(flow_num_scf_layers=4, flow_num_hidden_layers=4, flow_hidden_dim=20,
+model = DiscreteFlow(flow_num_scf_layers=16, flow_num_hidden_layers=32, flow_hidden_dim=256,
                      flow_data_dim=args.max_prev_node, flow_conditional_inp_dim=args.max_prev_node//4,
                      vae_num_max_prev_node=args.max_prev_node).to(device)
-optimizer = optim.Adam(model.parameters(), lr=1e-3)
+optimizer = optim.SGD(model.parameters(), lr=1e-3)
 BCE_loss_function = torch.nn.BCEWithLogitsLoss(reduction='mean')
 
 # Reconstruction + KL divergence losses summed over all elements and batch
@@ -90,6 +90,8 @@ def flow_loss_function(epsilon, logdet) :
 
     log_p_eps = -1/2*(math.log(2*math.pi) + epsilon.view(epsilon.shape[0], -1).pow(2)).sum(-1)
     log_p_z = log_p_eps - logdet.sum()
+    # print(logdet.sum().item()/logdet.shape[1], -log_p_eps.item()/logdet.shape[1])
+    log_p_z /= logdet.shape[1]
     return -log_p_z
 
 def train(epoch):
@@ -99,15 +101,21 @@ def train(epoch):
     for batch_idx, data in enumerate(train_iter):
         data = data.float().to(device)
         optimizer.zero_grad()
-        recon_batch, mu, logvar, epsilon, logdet = model(data)
-
-        vae_loss = vae_loss_function(recon_batch, data, mu, logvar)
-        flow_loss = flow_loss_function(epsilon, logdet)
 
         # print(vae_loss.shape)
         # print(flow_loss.shape)
         # exit()
-        loss = vae_loss + flow_loss
+
+        # loss = vae_loss + 0.1*flow_loss
+
+        if epoch <= args.epochs//2:
+            recon_batch, mu, logvar = model(data, phase='vae')
+            loss = vae_loss_function(recon_batch, data, mu, logvar)
+        else :
+            # for g in optimizer.param_groups:
+            #     g['lr'] = 1e-8
+            epsilon, logdet = model(data, phase='flow')
+            loss = flow_loss_function(epsilon, logdet)
 
         loss.backward()
         train_loss += loss.item()

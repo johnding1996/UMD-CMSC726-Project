@@ -1,6 +1,8 @@
 import math
 import torch
 
+EPS = 1e-6
+
 class Affine():
     num_params = 2
 
@@ -34,11 +36,11 @@ class Affine():
 
 
 def arccosh(x):
-    return torch.log(x + torch.sqrt(x.pow(2) - 1))
+    return torch.log(x + torch.sqrt(x.pow(2) - 1) + EPS)
 
 
 def arcsinh(x):
-    return torch.log(x + torch.sqrt(x.pow(2) + 1))
+    return torch.log(x + torch.sqrt(x.pow(2) + 1) + EPS)
 
 
 class NLSq():
@@ -57,6 +59,8 @@ class NLSq():
         logd = nn_outp[..., 3] * 0.4
         f = nn_outp[..., 4]
 
+        assert not (True in torch.isnan(logb)), "logb exploded"
+
         b = torch.exp(logb)
         d = torch.exp(logd)
         c = torch.tanh(B) * torch.exp(NLSq.logA + logb - logd)
@@ -68,6 +72,8 @@ class NLSq():
         a, b, c, d, f = NLSq.get_pseudo_params(nn_outp)
 
         # print(a.shape)
+        # print(nn_outp.shape)
+        # exit()
 
         # double needed for stability. No effect on overall speed
         a = a.double()
@@ -103,7 +109,26 @@ class NLSq():
 
         x_new = a + b * y + c / denom
 
-        logdet = -torch.log(b - 2 * c * d * arg / denom.pow(2)).sum(-1)
+
+        tmp = b - 2 * c * d * arg / denom.pow(2)
+
+        assert not (True in torch.isnan(b)), "b exploded"
+        assert not (True in torch.isnan(c)), "c exploded"
+        assert not (True in torch.isnan(d)), "d exploded"
+        assert not (True in torch.isnan(arg)), "arg exploded"
+        assert not (True in torch.isnan(denom)), "demon exploded"
+
+        assert not (0 in denom.pow(2)), "denom.pow(2) exploded"
+
+        assert not(True in torch.isnan(tmp)), "tmp exploded"
+
+        assert not(False in tmp > 0), "log(x), x < 0"
+
+
+        logdet = -torch.log(b - 2 * c * d * arg / denom.pow(2) + EPS).sum(-1)
+
+
+        assert not(True in torch.isnan(logdet)), "log exploded"
 
         y = y.float()
         logdet = logdet.float()
@@ -118,6 +143,6 @@ class NLSq():
         denom = 1 + arg.pow(2)
         x = a + b * y + c / denom
 
-        logdet = -torch.log(b - 2 * c * d * arg / denom.pow(2)).sum(-1)
+        logdet = -torch.log(b - 2 * c * d * arg / denom.pow(2) + EPS).sum(-1)
 
         return x, logdet

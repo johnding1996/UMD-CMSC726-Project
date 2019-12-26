@@ -60,17 +60,22 @@ class FeedForwardNet(nn.Module):
         return self.net(x)
 
 class SCFLayer(nn.Module) :
-    def __init__(self, num_hidden_layers, hidden_dim, data_dim, conditional_inp_dim, transform_function=NLSq):
+    def __init__(self, num_hidden_layers, hidden_dim, data_dim, conditional_inp_dim, reverse, transform_function=NLSq):
         super(SCFLayer, self).__init__()
         self.data_dim = data_dim
-        self.net = FeedForwardNet(num_hidden_layers=num_hidden_layers,
-                                  input_dim=self.data_dim//2+conditional_inp_dim,
-                                  hidden_dim=hidden_dim,
-                                  output_dim=(self.data_dim-(self.data_dim//2))*transform_function.num_params)
 
         indices = torch.arange(self.data_dim)
-        self.first_indices = indices[:self.data_dim//2]
-        self.second_indices = indices[self.data_dim//2:]
+        if reverse :
+            self.first_indices = indices[self.data_dim//2:]
+            self.second_indices = indices[:self.data_dim//2]
+        else :
+            self.first_indices = indices[:self.data_dim//2]
+            self.second_indices = indices[self.data_dim//2:]
+
+        self.net = FeedForwardNet(num_hidden_layers=num_hidden_layers,
+                                  input_dim=self.first_indices.shape[0]+conditional_inp_dim,
+                                  hidden_dim=hidden_dim,
+                                  output_dim=self.second_indices.shape[0]*transform_function.num_params)
 
         self.train_function = transform_function.standard
         self.generate_function = transform_function.reverse
@@ -86,7 +91,7 @@ class SCFLayer(nn.Module) :
         # epsilon = z.clone().detach().requires_grad_(True)
         epsilon = torch.tensor(z)
         epsilon[..., self.second_indices], delta_logdet = \
-            self.train_function(z[..., self.second_indices], net_output.view(*net_input.shape[:-1], self.data_dim-(self.data_dim//2), -1))
+            self.train_function( z[..., self.second_indices], net_output.view(*net_input.shape[:-1], self.data_dim-(self.data_dim//2), -1) )
 
         return epsilon, logdet+delta_logdet, cond_input
 
@@ -94,8 +99,10 @@ class SCF(nn.Module) :
     def __init__(self, num_scf_layers, num_hidden_layers, hidden_dim, data_dim, conditional_inp_dim):
         super(SCF, self).__init__()
         layers = []
+        reverse = False
         for i in range(num_scf_layers) :
-            layers.append(SCFLayer(num_hidden_layers, hidden_dim, data_dim, conditional_inp_dim))
+            layers.append(SCFLayer(num_hidden_layers, hidden_dim, data_dim, conditional_inp_dim, reverse))
+            reverse = not reverse
         self.scf = torch.nn.Sequential(*layers)
 
     def forward(self, input) :
@@ -118,21 +125,29 @@ class Flow(nn.Module) :
         # print(rnn_output[:,1:].shape)
         cond_input = torch.cat((torch.zeros(rnn_output.shape[0], 1, rnn_output.shape[2]), rnn_output[:,1:]), dim=1)
 
-
         epsilon, logdet = self.flow((z, cond_input))
         return epsilon, logdet
 
 class DiscreteFlow(nn.Module) :
     def __init__(self, flow_num_scf_layers, flow_num_hidden_layers, flow_hidden_dim, flow_data_dim, flow_conditional_inp_dim,
-                    vae_num_max_prev_node, vae_encoder_layers=2, vae_decoder_layers=2) :
+                    vae_num_max_prev_node, vae_encoder_layers=4, vae_decoder_layers=4) :
         super(DiscreteFlow, self).__init__()
         self.vae = VAE(vae_num_max_prev_node, vae_encoder_layers, vae_decoder_layers)
         self.flow = Flow(flow_num_scf_layers, flow_num_hidden_layers, flow_hidden_dim, flow_data_dim, flow_conditional_inp_dim)
 
-    def forward(self, input):
+    def forward(self, input, phase):
         data = input
-        recon_batch, z, mu, logvar = self.vae(data)
-        epsilon, logdet = self.flow(z)
 
-        return recon_batch, mu, logvar, epsilon, logdet
+        if phase == 'vae' :
+            recon_batch, z, mu, logvar = self.vae(data)
+            return recon_batch, mu, logvar
+
+        elif phase == 'flow' :
+            with torch.no_grad() :
+                z, _, _ = self.vae.inference(data)
+            epsilon, logdet = self.flow(z)
+            return epsilon, logdet
+
+        else :
+            raise ValueError('Only two phases are supported.')
 
