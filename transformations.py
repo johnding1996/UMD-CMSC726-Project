@@ -36,11 +36,11 @@ class Affine():
 
 
 def arccosh(x):
-    return torch.log(x + torch.sqrt(x.pow(2) - 1) + EPS)
+    return torch.log(x + torch.sqrt(x.pow(2) - 1))
 
 
 def arcsinh(x):
-    return torch.log(x + torch.sqrt(x.pow(2) + 1) + EPS)
+    return torch.log(x + torch.sqrt(x.pow(2) + 1))
 
 
 class NLSq():
@@ -143,6 +143,6 @@ class NLSq():
         denom = 1 + arg.pow(2)
         x = a + b * y + c / denom
 
-        logdet = -torch.log(b - 2 * c * d * arg / denom.pow(2) + EPS).sum(-1)
+        logdet = -torch.log(b - 2 * c * d * arg / denom.pow(2)).sum(-1)
 
         return x, logdet

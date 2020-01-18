@@ -18,9 +18,9 @@ parser = argparse.ArgumentParser(description='Graph Discrete Flow')
 parser.add_argument('--batch-size', type=int, default=1, metavar='N',
                     help='input batch size for training (default: 128)')
 parser.add_argument('--batch_ratio', type=int,
-                    default=8)  # how many batches of samples per epoch, default 32, e.g., 1 epoch = 32 batches
+                    default=80)  # how many batches of samples per epoch, default 32, e.g., 1 epoch = 32 batches
 
-parser.add_argument('--epochs', type=int, default=20, metavar='N',
+parser.add_argument('--epochs', type=int, default=80, metavar='N',
                     help='number of epochs to train (default: 10)')
 parser.add_argument('--no-cuda', action='store_true',
                     help='enables CUDA training')
@@ -28,9 +28,10 @@ parser.add_argument('--seed', type=int, default=1, metavar='S',
                     help='random seed (default: 1)')
 parser.add_argument('--log-interval', type=int, default=10, metavar='N',
                     help='how many batches to wait before logging training status')
-parser.add_argument('--output-dir', type=str, default='output')
-parser.add_argument('--run-name', type=str, default='vae_test')
-parser.add_argument('--graph-type', type=str, default='barabasi_small')
+# parser.add_argument('--output-dir', type=str, default='output')
+parser.add_argument('--output-dir', type=str, default='/cmlscratch/kong/records/flow')
+parser.add_argument('--run-name', type=str, default='grid0')
+parser.add_argument('--graph-type', type=str, default='grid')
 
 
 args = parser.parse_args()
@@ -72,7 +73,7 @@ kwargs = {'num_workers': 4, 'pin_memory': True} if args.cuda else {}
 train_iter = torch.utils.data.DataLoader(dataset_train, batch_size=args.batch_size, sampler=sample_strategy, **kwargs)
 test_iter = torch.utils.data.DataLoader(dataset_test, batch_size=args.batch_size, sampler=sample_strategy, **kwargs)
 
-model = DiscreteFlow(flow_num_scf_layers=16, flow_num_hidden_layers=32, flow_hidden_dim=256,
+model = DiscreteFlow(flow_num_scf_layers=64, flow_num_hidden_layers=8, flow_hidden_dim=128,
                      flow_data_dim=args.max_prev_node, flow_conditional_inp_dim=args.max_prev_node//4,
                      vae_num_max_prev_node=args.max_prev_node).to(device)
 optimizer = optim.SGD(model.parameters(), lr=1e-3)
@@ -87,12 +88,15 @@ def vae_loss_function(recon_x, x, mu, logvar):
     return BCE + KLD
 
 def flow_loss_function(epsilon, logdet) :
+    # print(epsilon.shape)
+    # print(logdet.shape)
+    # exit()
+    log_p_eps = -1/2*(math.log(2*math.pi) + epsilon.pow(2)).sum(-1)
+    log_p_z = log_p_eps - logdet
 
-    log_p_eps = -1/2*(math.log(2*math.pi) + epsilon.view(epsilon.shape[0], -1).pow(2)).sum(-1)
-    log_p_z = log_p_eps - logdet.sum()
-    # print(logdet.sum().item()/logdet.shape[1], -log_p_eps.item()/logdet.shape[1])
-    log_p_z /= logdet.shape[1]
-    return -log_p_z
+    # print("-log_p_eps: {}".format(log_p_eps.sum()))
+    # print("logdet: {}".format(logdet.sum()))
+    return -log_p_z.mean()/logdet.shape[1]
 
 def train(epoch):
     model.train()
@@ -108,14 +112,25 @@ def train(epoch):
 
         # loss = vae_loss + 0.1*flow_loss
 
-        if epoch <= args.epochs//2:
-            recon_batch, mu, logvar = model(data, phase='vae')
-            loss = vae_loss_function(recon_batch, data, mu, logvar)
+        two_phases = False
+        if two_phases :
+            if epoch <= args.epochs//2:
+                recon_batch, mu, logvar = model(data, phase='vae')
+                loss = vae_loss_function(recon_batch, data, mu, logvar)
+            else :
+                # for g in optimizer.param_groups:
+                #     g['lr'] = 1e-3
+                epsilon, logdet = model(data, phase='flow')
+                loss = flow_loss_function(epsilon, logdet)
+
         else :
-            # for g in optimizer.param_groups:
-            #     g['lr'] = 1e-8
-            epsilon, logdet = model(data, phase='flow')
-            loss = flow_loss_function(epsilon, logdet)
+            recon_batch, z, mu, logvar, epsilon, logdet = model(data)
+            loss = vae_loss_function(recon_batch, data, mu, logvar)
+            if epoch > args.epochs//2:
+                # for g in optimizer.param_groups:
+                #     g['lr'] = 1e-4
+                loss += flow_loss_function(epsilon, logdet)
+
 
         loss.backward()
         train_loss += loss.item()
@@ -129,6 +144,34 @@ def train(epoch):
     print('====> Epoch: {} Average loss: {:.4f}'.format(
           epoch, train_loss / len(train_iter.dataset)))
 
+# def train(epoch):
+#     model.train()
+#     train_loss = 0
+#
+#     for batch_idx, data in enumerate(train_iter):
+#         data = data.float().to(device)
+#
+#         if batch_idx%10 == 0 :
+#             optimizer.zero_grad()
+#
+#         recon_batch, z, mu, logvar, epsilon, logdet = model(data)
+#         loss = vae_loss_function(recon_batch, data, mu, logvar)
+#         if epoch > args.epochs//2:
+#             loss += flow_loss_function(epsilon, logdet)
+#         train_loss += loss.item()
+#
+#         if batch_idx % 10 == 9:
+#             loss.backward()
+#             optimizer.step()
+#
+#         if batch_idx % args.log_interval == 0:
+#             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
+#                 epoch, batch_idx * len(data), len(train_iter.dataset),
+#                 100. * batch_idx / len(train_iter),
+#                 loss.item() / len(data)))
+#
+#     print('====> Epoch: {} Average loss: {:.4f}'.format(
+#           epoch, train_loss / len(train_iter.dataset)))
 
 # def test(epoch):
 #     model.eval()

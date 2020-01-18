@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
-from transformations import NLSq
+from transformations import NLSq, Affine
 
 class VAE(nn.Module):
     def __init__(self, num_max_prev_node, encoder_layers, decoder_layers):
@@ -77,8 +77,13 @@ class SCFLayer(nn.Module) :
                                   hidden_dim=hidden_dim,
                                   output_dim=self.second_indices.shape[0]*transform_function.num_params)
 
-        self.train_function = transform_function.standard
-        self.generate_function = transform_function.reverse
+        # self.net = FeedForwardNet(num_hidden_layers=num_hidden_layers,
+        #                           input_dim=self.first_indices.shape[0],
+        #                           hidden_dim=hidden_dim,
+        #                           output_dim=self.second_indices.shape[0]*transform_function.num_params)
+
+        self.train_function = transform_function.reverse
+        self.generate_function = transform_function.standard
 
 
     def forward(self, input):
@@ -86,12 +91,13 @@ class SCFLayer(nn.Module) :
         z, logdet, cond_input = input
 
         net_input = torch.cat((z[..., self.first_indices], cond_input), -1)
+        # net_input = z[..., self.first_indices]
         net_output = self.net(net_input)
 
         # epsilon = z.clone().detach().requires_grad_(True)
         epsilon = torch.tensor(z)
         epsilon[..., self.second_indices], delta_logdet = \
-            self.train_function( z[..., self.second_indices], net_output.view(*net_input.shape[:-1], self.data_dim-(self.data_dim//2), -1) )
+            self.train_function( z[..., self.second_indices], net_output.view(*net_output.shape[:-1], self.second_indices.shape[0], -1) )
 
         return epsilon, logdet+delta_logdet, cond_input
 
@@ -123,7 +129,7 @@ class Flow(nn.Module) :
 
         # print(torch.zeros(rnn_output.shape[-1]).shape)
         # print(rnn_output[:,1:].shape)
-        cond_input = torch.cat((torch.zeros(rnn_output.shape[0], 1, rnn_output.shape[2]), rnn_output[:,1:]), dim=1)
+        cond_input = torch.cat((torch.zeros(rnn_output.shape[0], 1, rnn_output.shape[2]).cuda(), rnn_output[:,1:]), dim=1)
 
         epsilon, logdet = self.flow((z, cond_input))
         return epsilon, logdet
@@ -135,7 +141,7 @@ class DiscreteFlow(nn.Module) :
         self.vae = VAE(vae_num_max_prev_node, vae_encoder_layers, vae_decoder_layers)
         self.flow = Flow(flow_num_scf_layers, flow_num_hidden_layers, flow_hidden_dim, flow_data_dim, flow_conditional_inp_dim)
 
-    def forward(self, input, phase):
+    def forward(self, input, phase=None):
         data = input
 
         if phase == 'vae' :
@@ -149,5 +155,8 @@ class DiscreteFlow(nn.Module) :
             return epsilon, logdet
 
         else :
-            raise ValueError('Only two phases are supported.')
+            recon_batch, z, mu, logvar = self.vae(data)
+            epsilon, logdet = self.flow(z)
+            return recon_batch, z, mu, logvar, epsilon, logdet
+
 
