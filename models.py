@@ -27,9 +27,9 @@ class VAE(nn.Module):
         return mu, logvar
 
     def reparameterize(self, mu, logvar):
-        std = torch.exp(0.5 * logvar.view(logvar.shape[0], -1) )
+        std = torch.exp(0.5 * logvar.reshape(logvar.shape[0], -1) )
         eps = torch.randn_like(std)
-        return mu.view(mu.shape[0], -1) + eps*std
+        return mu.reshape(mu.shape[0], -1) + eps*std
 
     def decode(self, z):
         output, _ = self.rnn3(z)
@@ -60,7 +60,7 @@ class FeedForwardNet(nn.Module):
         return self.net(x)
 
 class SCFLayer(nn.Module) :
-    def __init__(self, num_hidden_layers, hidden_dim, data_dim, conditional_inp_dim, reverse, transform_function=NLSq):
+    def __init__(self, num_hidden_layers, hidden_dim, data_dim, conditional_inp_dim, reverse, transform_function=Affine):
         super(SCFLayer, self).__init__()
         self.data_dim = data_dim
 
@@ -76,19 +76,19 @@ class SCFLayer(nn.Module) :
                                   input_dim=self.first_indices.shape[0]+conditional_inp_dim,
                                   hidden_dim=hidden_dim,
                                   output_dim=self.second_indices.shape[0]*transform_function.num_params)
+        self.rnn = torch.nn.GRU(input_size=data_dim, hidden_size=conditional_inp_dim, batch_first=True)
 
-        # self.net = FeedForwardNet(num_hidden_layers=num_hidden_layers,
-        #                           input_dim=self.first_indices.shape[0],
-        #                           hidden_dim=hidden_dim,
-        #                           output_dim=self.second_indices.shape[0]*transform_function.num_params)
-
-        self.train_function = transform_function.reverse
+        self.train_function = transform_function.standard
         self.generate_function = transform_function.standard
 
 
     def forward(self, input):
 
-        z, logdet, cond_input = input
+        z, logdet, _ = input
+
+        rnn_output, rnn_h_n = self.rnn(z)
+        cond_input = torch.cat((torch.zeros(rnn_output.shape[0], 1, rnn_output.shape[2]).cuda(),
+                                rnn_output[:, 1:]), dim=1)
 
         net_input = torch.cat((z[..., self.first_indices], cond_input), -1)
         # net_input = z[..., self.first_indices]
@@ -134,12 +134,17 @@ class Flow(nn.Module) :
         epsilon, logdet = self.flow((z, cond_input))
         return epsilon, logdet
 
+    # def generate(self, input):
+
+
 class DiscreteFlow(nn.Module) :
     def __init__(self, flow_num_scf_layers, flow_num_hidden_layers, flow_hidden_dim, flow_data_dim, flow_conditional_inp_dim,
-                    vae_num_max_prev_node, vae_encoder_layers=4, vae_decoder_layers=4) :
+                    vae_num_max_prev_node, batch_size, vae_encoder_layers=4, vae_decoder_layers=4) :
         super(DiscreteFlow, self).__init__()
         self.vae = VAE(vae_num_max_prev_node, vae_encoder_layers, vae_decoder_layers)
         self.flow = Flow(flow_num_scf_layers, flow_num_hidden_layers, flow_hidden_dim, flow_data_dim, flow_conditional_inp_dim)
+        self.flow_data_dim = flow_data_dim
+        self.batch_size = batch_size
 
     def forward(self, input, phase=None):
         data = input
@@ -159,4 +164,7 @@ class DiscreteFlow(nn.Module) :
             epsilon, logdet = self.flow(z)
             return recon_batch, z, mu, logvar, epsilon, logdet
 
-
+    def generate(self, num_of_nodes, device):
+        epsilon = torch.randn((self.batch_size, num_of_nodes, self.flow_data_dim), device=device)
+        z = self.flow.generate(epsilon)
+        return self.vae.decode(z)

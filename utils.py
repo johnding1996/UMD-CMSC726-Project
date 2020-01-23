@@ -2,6 +2,31 @@ import pickle
 import networkx as nx
 import numpy as np
 
+def connected_component_subgraphs(G):
+    for c in nx.connected_components(G):
+        yield G.subgraph(c)
+
+def n_community(c_sizes, p_inter=0.01):
+    graphs = [nx.gnp_random_graph(c_sizes[i], 0.7, seed=i) for i in range(len(c_sizes))]
+    G = nx.disjoint_union_all(graphs)
+    communities = list(connected_component_subgraphs(G))
+    for i in range(len(communities)):
+        subG1 = communities[i]
+        nodes1 = list(subG1.nodes())
+        for j in range(i+1, len(communities)):
+            subG2 = communities[j]
+            nodes2 = list(subG2.nodes())
+            has_inter_edge = False
+            for n1 in nodes1:
+                for n2 in nodes2:
+                    if np.random.rand() < p_inter:
+                        G.add_edge(n1, n2)
+                        has_inter_edge = True
+            if not has_inter_edge:
+                G.add_edge(nodes1[0], nodes2[0])
+    #print('connected comp: ', len(list(nx.connected_component_subgraphs(G))))
+    return G
+
 def create_graphs(args):
 ### load datasets
     graphs=[]
@@ -63,7 +88,7 @@ def create_graphs(args):
         print('Creating dataset with ', num_communities, ' communities')
         c_sizes = np.random.choice([12, 13, 14, 15, 16, 17], num_communities)
         #c_sizes = [15] * num_communities
-        for k in range(3000):
+        for k in range(5000):
             graphs.append(n_community(c_sizes, p_inter=0.01))
         args.max_prev_node = 80
     elif args.graph_type=='grid':
@@ -92,6 +117,12 @@ def create_graphs(args):
                  for k in range(10):
                     graphs.append(nx.barabasi_albert_graph(i,j))
         args.max_prev_node = 20
+    elif args.graph_type=='barabasi_test':
+        graphs = []
+        for j in range(3,4):
+            for k in range(400):
+                graphs.append(nx.barabasi_albert_graph(11,j))
+        args.max_prev_node = 10
     elif args.graph_type=='grid_big':
         graphs = []
         for i in range(36, 46):
