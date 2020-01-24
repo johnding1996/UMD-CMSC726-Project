@@ -39,6 +39,7 @@ setattr(args, 'savedir', args.output_dir + '/' + args.run_name + '/saves/')
 setattr(args, 'logdir', args.output_dir + '/' + args.run_name + '/logs/')
 setattr(args, 'fname_train', args.graph_type + '_train_')
 setattr(args, 'fname_test', args.graph_type + '_test_')
+setattr(args, 'fname_pred', args.graph_type + '_pred_')
 setattr(args, 'graph_save_path', args.output_dir + '/graphs')
 args.cuda = not args.no_cuda and torch.cuda.is_available()
 
@@ -61,7 +62,7 @@ save_graph_list(graphs, args.graph_save_path + args.fname_test + '0.dat')
 print('train and test graphs saved at: ', args.graph_save_path + args.fname_test + '0.dat')
 
 
-dataset_train = GraphDataset(graphs_train,max_prev_node=args.max_prev_node)
+dataset_train =  (graphs_train,max_prev_node=args.max_prev_node)
 dataset_val = GraphDataset(graphs_validate,max_prev_node=args.max_prev_node)
 dataset_test = GraphDataset(graphs_test,max_prev_node=args.max_prev_node)
 
@@ -69,7 +70,7 @@ dataset_test = GraphDataset(graphs_test,max_prev_node=args.max_prev_node)
 sample_strategy = torch.utils.data.sampler.WeightedRandomSampler([1.0 / len(dataset_train) for i in range(len(dataset_train))],
                                                                 num_samples=len(dataset_train), replacement=True)
 
-kwargs = {'num_workers': 4, 'pin_memory': True} if args.cuda else {}
+kwargs = {'num_workers': 1, 'pin_memory': True} if args.cuda else {}
 train_iter = torch.utils.data.DataLoader(dataset_train, batch_size=args.batch_size, sampler=sample_strategy, **kwargs)
 test_iter = torch.utils.data.DataLoader(dataset_test, batch_size=args.batch_size, sampler=sample_strategy, **kwargs)
 
@@ -140,9 +141,17 @@ def train(epoch):
                 epoch, batch_idx * len(data), len(train_iter.dataset),
                 100. * batch_idx / len(train_iter),
                 loss.item() / len(data)))
+            # TODO: save checkpoints
+            # save pred graphs
+            pred_graphs = convert_graph(recon_batch)
+            # print(pred_graphs[0].nodes())
+            # print(pred_graphs[0].edges())
+            save_graph_list(pred_graphs, args.graph_save_path + args.fname_pred + str(epoch) + '.dat')
 
     print('====> Epoch: {} Average loss: {:.4f}'.format(
           epoch, train_loss / len(train_iter.dataset)))
+
+    
 
 # def train(epoch):
 #     model.train()
