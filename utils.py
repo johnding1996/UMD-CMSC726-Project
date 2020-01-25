@@ -120,7 +120,7 @@ def create_graphs(args):
     elif args.graph_type=='barabasi_test':
         graphs = []
         for j in range(3,4):
-            for k in range(400):
+            for k in range(10):
                 graphs.append(nx.barabasi_albert_graph(11,j))
         args.max_prev_node = 10
     elif args.graph_type=='grid_big':

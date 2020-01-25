@@ -1,7 +1,6 @@
 import math
 import torch
 
-EPS = 1e-6
 
 class Affine():
     num_params = 2
@@ -19,7 +18,6 @@ class Affine():
     @staticmethod
     def standard(x, nn_outp):
         a, logbsq, b = Affine.get_pseudo_params(nn_outp)
-
         y = a + b * x
         logdet = 0.5 * logbsq.sum(-1)
 
@@ -117,15 +115,12 @@ class NLSq():
         assert not (True in torch.isnan(d)), "d exploded"
         assert not (True in torch.isnan(arg)), "arg exploded"
         assert not (True in torch.isnan(denom)), "demon exploded"
-
         assert not (0 in denom.pow(2)), "denom.pow(2) exploded"
-
         assert not(True in torch.isnan(tmp)), "tmp exploded"
-
         assert not(False in tmp > 0), "log(x), x < 0"
 
 
-        logdet = -torch.log(b - 2 * c * d * arg / denom.pow(2) + EPS).sum(-1)
+        logdet = -torch.log(b - 2 * c * d * arg / denom.pow(2) ).sum(-1)
 
 
         assert not(True in torch.isnan(logdet)), "log exploded"
