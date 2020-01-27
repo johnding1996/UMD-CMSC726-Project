@@ -12,6 +12,8 @@ from utils import *
 from data import GraphDataset
 from models import DiscreteFlow
 import math
+import eval.stats
+import numpy as np
 
 
 parser = argparse.ArgumentParser(description='Graph Discrete Flow')
@@ -20,7 +22,7 @@ parser.add_argument('--batch-size', type=int, default=1, metavar='N',
 parser.add_argument('--batch_ratio', type=int,
                     default=80)  # how many batches of samples per epoch, default 32, e.g., 1 epoch = 32 batches
 
-parser.add_argument('--epochs', type=int, default=2, metavar='N',
+parser.add_argument('--epochs', type=int, default=10000, metavar='N',
                     help='number of epochs to train (default: 10)')
 parser.add_argument('--no-cuda', action='store_true',
                     help='enables CUDA training')
@@ -30,15 +32,24 @@ parser.add_argument('--log-interval', type=int, default=16, metavar='N',
                     help='how many batches to wait before logging training status')
 # parser.add_argument('--output-dir', type=str, default='output')
 parser.add_argument('--output-dir', type=str, default='/cmlscratch/kong/records/flow')
-parser.add_argument('--run-name', type=str, default='grid0')
+parser.add_argument('--run-name', type=str, default='run6')
 parser.add_argument('--graph-type', type=str, default='grid') #barabasi_test
 
 
+parser.add_argument('--flow-num-scf-layers', type=int, default=16)
+parser.add_argument('--flow-num-hidden-layers', type=int, default=4)
+parser.add_argument('--flow-hidden-dim', type=int, default=32)
+parser.add_argument('--lr', type=float, default=5e-3)
+
+
 args = parser.parse_args()
-setattr(args, 'savedir', args.output_dir + '/' + args.run_name + '/saves/')
-setattr(args, 'logdir', args.output_dir + '/' + args.run_name + '/logs/')
+setattr(args, 'savedir', args.output_dir + '/' + args.run_name + '/saves')
+setattr(args, 'logdir', args.output_dir + '/' + args.run_name + '/logs')
 setattr(args, 'fname_train', args.graph_type + '_train_')
 setattr(args, 'fname_test', args.graph_type + '_test_')
+
+setattr(args, 'fname_pred', args.graph_type + '_pred_')
+
 setattr(args, 'graph_save_path', args.output_dir + '/graphs')
 args.cuda = not args.no_cuda and torch.cuda.is_available()
 
@@ -75,19 +86,26 @@ kwargs = {'num_workers': 4, 'pin_memory': True} if args.cuda else {}
 train_iter = torch.utils.data.DataLoader(dataset_train, batch_size=args.batch_size, sampler=sample_strategy, **kwargs)
 test_iter = torch.utils.data.DataLoader(dataset_test, batch_size=args.batch_size, sampler=sample_strategy, **kwargs)
 
-model = DiscreteFlow(flow_num_scf_layers=8, flow_num_hidden_layers=4, flow_hidden_dim=32,
-                     flow_data_dim=args.max_prev_node, flow_conditional_inp_dim=args.max_prev_node//4, #args.max_prev_node//4
+model = DiscreteFlow(flow_num_scf_layers=args.flow_num_scf_layers, flow_num_hidden_layers=args.flow_num_hidden_layers,
+                     flow_hidden_dim=args.flow_hidden_dim, flow_data_dim=args.max_prev_node//2, flow_conditional_inp_dim=None, #args.max_prev_node//4
                      vae_num_max_prev_node=args.max_prev_node, batch_size=args.batch_size).to(device)
-optimizer = optim.SGD(model.parameters(), lr=1e-3)
-BCE_loss_function = torch.nn.BCEWithLogitsLoss(reduction='mean')
+model_name = 'DiscreteFlow-{}-SCFLayers{}-FlowHiddenLayers{}-FlowHiddenDim{}-Epochs{}-LR{}-{}.pt'.format(
+    args.graph_type, args.flow_num_scf_layers, args.flow_num_hidden_layers, args.flow_hidden_dim, args.epochs, args.lr, args.run_name)
+log_name = 'DiscreteFlow-{}-SCFLayers{}-FlowHiddenLayers{}-FlowHiddenDim{}-Epochs{}-LR{}-{}.txt'.format(
+    args.graph_type, args.flow_num_scf_layers, args.flow_num_hidden_layers, args.flow_hidden_dim, args.epochs, args.lr, args.run_name)
+optimizer = optim.SGD(model.parameters(), lr=args.lr)
+BCE_loss_function = torch.nn.BCELoss(reduction='mean')
+MSE_loss_function = torch.nn.MSELoss(reduction='mean')
 
 # Reconstruction + KL divergence losses summed over all elements and batch
 def vae_loss_function(recon_x, x, mu, logvar):
     BCE = BCE_loss_function(recon_x.reshape(recon_x.shape[0], -1), x.reshape(x.shape[0], -1))
-    mu  = mu.reshape(mu.shape[0], -1)
-    logvar = logvar.reshape(logvar.shape[0], -1)
-    KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
-    return BCE + KLD
+    # MSE = MSE_loss_function(recon_x.reshape(recon_x.shape[0], -1), x.reshape(x.shape[0], -1))
+    # mu  = mu.reshape(mu.shape[0], -1)
+    # logvar = logvar.reshape(logvar.shape[0], -1)
+    # KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+    # return BCE + (1e-3)*KLD
+    return BCE
 
 def flow_loss_function(epsilon, logdet) :
     # print(epsilon.shape)
@@ -109,7 +127,7 @@ def flow_loss_function(epsilon, logdet) :
     # return -log_p_z.mean()/logdet.shape[1]
     return ratio*log_p_z, ratio*log_p_eps, ratio*log_det
 
-def train(epoch):
+def train(epoch, f):
     model.train()
     train_loss, train_log_det, train_log_p = 0, 0, 0
 
@@ -122,7 +140,7 @@ def train(epoch):
         # exit()
 
         two_phase = False
-        if epoch <= args.epochs//2: #args.epochs//2
+        if epoch <= 200: #args.epochs//2
             recon_batch, mu, logvar = model(data, phase='vae')
             loss = vae_loss_function(recon_batch, data, mu, logvar)
         else :
@@ -132,15 +150,14 @@ def train(epoch):
                 train_log_det += log_det.item()
                 train_log_p += log_p.item()
             else : #train the whole model
-                # for g in optimizer.param_groups:
-                #     g['lr'] = 1e-7
+                for g in optimizer.param_groups:
+                    g['lr'] = 1e-3
                 recon_batch, z, mu, logvar, epsilon, logdet = model(data)
                 loss = vae_loss_function(recon_batch, data, mu, logvar)
                 loss_flow, log_p, log_det = flow_loss_function(epsilon, logdet)
                 loss += loss_flow
                 train_log_det += log_det.item()
                 train_log_p += log_p.item()
-
 
         loss.backward()
         train_loss += loss.item()
@@ -153,10 +170,12 @@ def train(epoch):
                 100. * batch_idx / len(train_iter),
                 loss.item() / len(data)))
 
-    print('====> Epoch: {} Average loss: {:.4f}'.format(
-          epoch, train_loss / len(train_iter.dataset)))
-    print('Average logdet: {:.4f} Average log_p: {:.4f}'.format(
-        train_log_det/len(train_iter.dataset), train_log_p/len(train_iter.dataset)))
+
+    tmp = '====> Epoch: {} Average loss: {:.4f}\n'.format(epoch, train_loss / len(train_iter.dataset))
+    tmp += '      Average logdet: {:.4f} Average log_p: {:.4f}\n'.format(
+        train_log_det/len(train_iter.dataset), train_log_p/len(train_iter.dataset))
+    f.write(tmp)
+    print(tmp)
 
 # def train(epoch):
 #     model.train()
@@ -187,12 +206,67 @@ def train(epoch):
 #     print('====> Epoch: {} Average loss: {:.4f}'.format(
 #           epoch, train_loss / len(train_iter.dataset)))
 
-def test():
+def test(f):
     model.eval()
-    num_of_nodes = [40,50,60]
+
+    # num_of_nodes = np.ones(1000, dtype=np.int)*180
+
+    # for g in graphs_train:
+    #     print(g.number_of_nodes())
+    #
+    # exit()
+
+    num_of_nodes = []
+    for graph_test in graphs_test :
+        num_of_nodes.append(graph_test.number_of_nodes()-2)
+
     with torch.no_grad():
-        graph_bfs_reps = model.generate(num_of_nodes, device)
-        print(graph_bfs_reps[0].shape)
+        graphs_bfs_reps = model.generate(num_of_nodes, device)
+
+        # count = 0
+        # for graph_bfs_rep in graphs_bfs_reps :
+        #     if True in (graph_bfs_rep > 0) :
+        #         count += 1
+        # print(count/1000)
+        # exit()
+
+        graphs_pre = convert_graph(graphs_bfs_reps)
+
+        # for g in graphs_bfs_reps :
+        #     print(g.shape)
+        #     exit()
+
+        # mmd_degree = eval.stats.degree_stats(graphs_test, graphs_pre)
+        # print(mmd_degree)
+
+        tmp = ''
+        try:
+            mmd_degree = eval.stats.degree_stats(graphs_test, graphs_pre)
+            tmp += 'mmd degree:{}\n'.format(mmd_degree)
+        except:
+            print("degree exploded")
+
+        try:
+            mmd_clustering = eval.stats.clustering_stats(graphs_test, graphs_pre)
+            tmp += 'mmd clustering:{}\n'.format(mmd_clustering)
+        except:
+            print('clustering exploded')
+
+        try:
+            mmd_4orbits = eval.stats.orbit_stats_all(graphs_test, graphs_pre)
+            tmp += 'mmd 4orbits:{}\n'.format(mmd_4orbits)
+        except:
+            print('orbits exploded')
+
+        f.write(tmp)
+        print(tmp)
+    # pred_graphs = convert_graph(recon_batch)
+    # # print(pred_graphs[0].nodes())
+    # # print(pred_graphs[0].edges())
+    # save_graph_list(pred_graphs, args.graph_save_path + args.fname_pred + str(epoch) + '.dat')
+
+
+
     # test_loss = 0
     # with torch.no_grad():
     #     for i, data in enumerate(test_iter):
@@ -210,10 +284,16 @@ def test():
     # print('====> Test set loss: {:.4f}'.format(test_loss))
 
 if __name__ == "__main__":
-    for epoch in range(1, args.epochs + 1):
-        train(epoch)
 
-    test()
+    with open(os.path.join(args.logdir, log_name), 'w') as f:
+        for epoch in range(1, args.epochs + 1):
+            train(epoch, f)
+
+            if epoch > 200 and epoch % 500 == 0 :
+                torch.save(model.state_dict(), os.path.join(args.savedir, str(epoch)+model_name))
+                test(f)
+
+        # model.load_state_dict(torch.load(os.path.join(args.savedir, model_name)))
         # test(epoch)
         # with torch.no_grad():
         #     sample = torch.randn(64, 20).to(device)

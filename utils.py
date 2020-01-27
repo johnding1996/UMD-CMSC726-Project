@@ -1,6 +1,7 @@
 import pickle
 import networkx as nx
 import numpy as np
+import torch
 
 def connected_component_subgraphs(G):
     for c in nx.connected_components(G):
@@ -306,3 +307,111 @@ def decode_adj_flexible(adj_output):
 
     return adj_full
 
+
+def pick_connected_component_new(G):
+    adj_list = G.adjacency_list()
+    for id, adj in enumerate(adj_list):
+        id_min = min(adj)
+        if id < id_min and id >= 1:
+            # if id<id_min and id>=4:
+            break
+    node_list = list(range(id))  # only include node prior than node "id"
+    G = G.subgraph(node_list)
+    G = max(nx.connected_component_subgraphs(G), key=len)
+    return G
+
+    # load a list of graphs
+
+
+def load_graph_list(fname, is_real=True):
+    with open(fname, "rb") as f:
+        graph_list = pickle.load(f)
+    # convert graph nodes from tuple to int
+    if 'grid' in fname:
+        for id, elem in enumerate(graph_list):
+            graph_list[id] = nx.from_numpy_matrix(np.asarray(nx.to_numpy_matrix(elem)))
+    for i in range(len(graph_list)):
+        edges_with_selfloops = graph_list[i].selfloop_edges()
+        if len(edges_with_selfloops) > 0:
+            graph_list[i].remove_edges_from(edges_with_selfloops)
+        if is_real:
+            graph_list[i] = max(nx.connected_component_subgraphs(graph_list[i]), key=len)
+            graph_list[i] = nx.convert_node_labels_to_integers(graph_list[i])
+        else:
+            graph_list[i] = pick_connected_component_new(graph_list[i])
+    return graph_list
+
+
+def get_graph(adj):
+    '''
+    get a graph from zero-padded adj
+    :param adj:
+    :return:
+    '''
+    # remove all zeros rows and columns
+    adj = adj[~np.all(adj == 0, axis=1)]
+    adj = adj[:, ~np.all(adj == 0, axis=0)]
+    adj = np.asmatrix(adj)
+    G = nx.from_numpy_matrix(adj)
+    return G
+
+
+def convert_graph(decoder_outputs):
+    ## shape: B*N*M continuous value
+    # print(decoder_outputs.shape)
+    output_adjs = []
+    for decoder_output_batch in decoder_outputs :
+        decoder_output_batch = decoder_output_batch.detach().cpu().numpy()
+        binary_S_pai = np.where(decoder_output_batch > 0.5, 1, 0)
+
+        # print(1 in binary_S_pai)
+        # print(decoder_output_batch.mean())
+        # exit()
+
+        for i in range(decoder_output_batch.shape[0]):  ## batch size
+            output_adjs.append(get_graph(decode_adj(binary_S_pai[i])))
+
+    return output_adjs
+
+
+def perturb(graph_list, p_del, p_add=None):
+    ''' Perturb the list of graphs by adding/removing edges.
+    Args:
+        p_add: probability of adding edges. If None, estimate it according to graph density,
+            such that the expected number of added edges is equal to that of deleted edges.
+        p_del: probability of removing edges
+    Returns:
+        A list of graphs that are perturbed from the original graphs
+    '''
+    perturbed_graph_list = []
+    for G_original in graph_list:
+        G = G_original.copy()
+        trials = np.random.binomial(1, p_del, size=G.number_of_edges())
+        edges = list(G.edges())
+        i = 0
+        for (u, v) in edges:
+            if trials[i] == 1:
+                G.remove_edge(u, v)
+            i += 1
+        if p_add is None:
+            num_nodes = G.number_of_nodes()
+            p_add_est = np.sum(trials) / (num_nodes * (num_nodes - 1) / 2 -
+                                          G.number_of_edges())
+        else:
+            p_add_est = p_add
+
+        nodes = list(G.nodes())
+        tmp = 0
+        for i in range(len(nodes)):
+            u = nodes[i]
+            trials = np.random.binomial(1, p_add_est, size=G.number_of_nodes())
+            j = 0
+            for j in range(i + 1, len(nodes)):
+                v = nodes[j]
+                if trials[j] == 1:
+                    tmp += 1
+                    G.add_edge(u, v)
+                j += 1
+
+        perturbed_graph_list.append(G)
+    return perturbed_graph_list

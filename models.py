@@ -3,47 +3,6 @@ from torch import nn
 from torch.nn import functional as F
 from transformations import NLSq, Affine
 
-class VAE(nn.Module):
-    def __init__(self, num_max_prev_node, encoder_layers, decoder_layers):
-        super(VAE, self).__init__()
-
-        self.input_size = num_max_prev_node #M
-        self.rnn1 = torch.nn.GRU(input_size=self.input_size, hidden_size=self.input_size, num_layers=encoder_layers, batch_first=True)
-        self.rnn21 = torch.nn.GRU(input_size=self.input_size, hidden_size=self.input_size, num_layers=1, batch_first=True)
-        self.rnn22 = torch.nn.GRU(input_size=self.input_size, hidden_size=self.input_size, num_layers=1, batch_first=True)
-        self.rnn3 = torch.nn.GRU(input_size=self.input_size, hidden_size=self.input_size, num_layers=decoder_layers, batch_first=True)
-
-
-        #flow model
-        ###########################################################################################
-        # self.prior = AFPrior(hidden_size=self.M, zsize=self.N, dropout_p=0, dropout_locations=['prior_rnn'], prior_type='AF', num_flow_layers=1, rnn_layers=2,
-        #                       transform_function='nlsq', hiddenflow_params=hiddenflow_params)
-        ###########################################################################################
-
-    def encode(self, x): #  (batch, seq_len, input_size)
-        output, h_n = self.rnn1(x)
-        mu, _ = self.rnn21(output) # (output, h_n)?    (batch, seq_len, input_size)
-        logvar, _ = self.rnn22(output) # (output, h_n)?  (batch, seq_len, input_size)
-        return mu, logvar
-
-    def reparameterize(self, mu, logvar):
-        std = torch.exp(0.5 * logvar.reshape(logvar.shape[0], -1) )
-        eps = torch.randn_like(std)
-        return mu.reshape(mu.shape[0], -1) + eps*std
-
-    def decode(self, z):
-        output, _ = self.rnn3(z)
-        return torch.sigmoid(output)
-
-    def inference(self, x):
-        mu, logvar = self.encode(x)
-        z = self.reparameterize(mu, logvar)
-        return z.view(-1, mu.shape[1], mu.shape[2]), mu, logvar
-
-    def forward(self, x):
-        z, mu, logvar = self.inference(x)
-        return self.decode(z), z, mu, logvar
-
 class FeedForwardNet(nn.Module):
 
     def __init__(self, num_hidden_layers, input_dim, hidden_dim, output_dim):
@@ -58,6 +17,61 @@ class FeedForwardNet(nn.Module):
 
     def forward(self, x):
         return self.net(x)
+
+class VAE(nn.Module):
+    def __init__(self, num_max_prev_node, encoder_layers, decoder_layers):
+        super(VAE, self).__init__()
+
+        self.input_size = num_max_prev_node #M
+        self.rnn1 = torch.nn.GRU(input_size=self.input_size, hidden_size=self.input_size//2, num_layers=encoder_layers, batch_first=True)
+        self.rnn21 = torch.nn.GRU(input_size=self.input_size, hidden_size=self.input_size, num_layers=1, batch_first=True)
+        self.rnn22 = torch.nn.GRU(input_size=self.input_size, hidden_size=self.input_size, num_layers=1, batch_first=True)
+        self.rnn3 = torch.nn.GRU(input_size=self.input_size, hidden_size=self.input_size, num_layers=decoder_layers, batch_first=True)
+
+        self.fout = FeedForwardNet(4, self.input_size//2, self.input_size, self.input_size)
+
+        #flow model
+        ###########################################################################################
+        # self.prior = AFPrior(hidden_size=self.M, zsize=self.N, dropout_p=0, dropout_locations=['prior_rnn'], prior_type='AF', num_flow_layers=1, rnn_layers=2,
+        #                       transform_function='nlsq', hiddenflow_params=hiddenflow_params)
+        ###########################################################################################
+
+    def encode(self, x): #  (batch, seq_len, input_size)
+        output, h_n = self.rnn1(x)
+        # mu, _ = self.rnn21(output) # (output, h_n)?    (batch, seq_len, input_size)
+        # logvar, _ = self.rnn22(output) # (output, h_n)?  (batch, seq_len, input_size)
+        # return mu, logvar
+        return output[:,:-1]
+
+
+    def reparameterize(self, mu, logvar):
+        std = torch.exp(0.5 * logvar.reshape(logvar.shape[0], -1) )
+        eps = torch.randn_like(std)
+        return mu.reshape(mu.shape[0], -1) + eps*std
+
+    def decode(self, z):
+        # output, _ = self.rnn3(z)
+        tmp = torch.zeros((1,1,self.input_size), device=z.device)
+        tmp[0,0,0] = 1
+
+        output = self.fout(z)
+        output = torch.sigmoid(output)
+        return torch.cat((tmp, output), dim=1)
+
+
+    def inference(self, x):
+        # mu, logvar = self.encode(x)
+        mu = self.encode(x)
+        # z = self.reparameterize(mu, logvar)
+        # return z.view(-1, mu.shape[1], mu.shape[2]), mu, logvar
+        return mu
+
+    def forward(self, x):
+        # z, mu, logvar = self.inference(x)
+        # return self.decode(z), z, mu, logvar
+        z = self.inference(x)
+        return self.decode(z), z, None, None
+
 
 class SCFLayer(nn.Module) :
     def __init__(self, num_hidden_layers, hidden_dim, data_dim, conditional_inp_dim, reverse, transform_function=Affine):
@@ -238,6 +252,7 @@ class DiscreteFlow(nn.Module) :
         for num_of_node in num_of_nodes :
             epsilon = torch.randn((self.batch_size, num_of_node, self.flow_data_dim), device=device)
             z = self.flow.generate(epsilon)
+
             graph_bfs_rep = self.vae.decode(z)
             graph_bfs_reps.append(graph_bfs_rep)
         return graph_bfs_reps

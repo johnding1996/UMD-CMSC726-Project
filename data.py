@@ -40,11 +40,14 @@ class GraphDataset(torch.utils.data.Dataset):
         G = nx.from_numpy_matrix(adj_copy_matrix)
         # then do bfs in the permuted G
         start_idx = np.random.randint(adj_copy.shape[0])
-        x_idx = np.array(bfs_seq(G, start_idx))  
+        x_idx = np.array(bfs_seq(G, start_idx))  ######################################################randomness investigating!!!!
         ## convert G's adj matrix into a BFS-ordered graph's adj matrix
         adj_copy = adj_copy[np.ix_(x_idx, x_idx)]  
         ## truncate the matrix into n*M(max_prev_node)
         adj_encoded = encode_adj(adj_copy.copy(), max_prev_node=self.max_prev_node) # (n-1)*M
+
+        # adj_encoded[adj_encoded == 0] = -1
+
         # get x and y and adj
         # for small graph the rest are zero padded
         # y_batch[0:adj_encoded.shape[0], :] = adj_encoded
